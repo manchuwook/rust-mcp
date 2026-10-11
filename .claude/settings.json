@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cargo --version; rustc --version; \\(Get-Command rust-analyzer -ErrorAction SilentlyContinue\\).Source; rust-analyzer --version; $env:RUST_ANALYZER_PATH; $env:HOME; $env:USERPROFILE; Get-Content x:\\\\dev\\\\rust-mcp\\\\src\\\\lib.rs; Get-Content x:\\\\dev\\\\rust-mcp\\\\src\\\\server\\\\mod.rs; Get-Content x:\\\\dev\\\\rust-mcp\\\\src\\\\tools\\\\analysis.rs | Select-Object -First 45)",
+      "Bash(python -)",
+      "Read(//c/Users/manchuwook/.cargo/registry/src/**)",
+      "Bash(cargo add *)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo clippy *)",
+      "Bash(grep -v \"^test .* ok$\")",
+      "Bash(python -I -)"
+    ]
+  }
+}
