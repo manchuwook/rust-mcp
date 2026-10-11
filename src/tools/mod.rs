@@ -6,6 +6,7 @@ pub mod generation;
 pub mod navigation;
 pub mod quality;
 pub mod refactoring;
+pub mod support;
 pub mod types;
 
 pub use types::*;

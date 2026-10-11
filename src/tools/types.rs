@@ -30,6 +30,18 @@ pub struct ToolResult {
     pub content: Vec<serde_json::Map<String, Value>>,
 }
 
+impl ToolResult {
+    /// A result with a single text block.
+    pub fn text(text: impl Into<String>) -> Self {
+        let mut block = serde_json::Map::new();
+        block.insert("type".to_string(), json!("text"));
+        block.insert("text".to_string(), json!(text.into()));
+        Self {
+            content: vec![block],
+        }
+    }
+}
+
 pub async fn execute_tool(
     name: &str,
     args: Value,
@@ -201,7 +213,11 @@ pub fn get_tools() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "struct_name": {"type": "string"},
-                    "fields": {"type": "array", "items": {"type": "object"}},
+                    "fields": {
+                        "type": "array",
+                        "description": "Fields as {name, type, public?, doc?} objects",
+                        "items": {"type": "object"}
+                    },
                     "derives": {"type": "array", "items": {"type": "string"}},
                     "file_path": {"type": "string"}
                 },
@@ -215,7 +231,11 @@ pub fn get_tools() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "enum_name": {"type": "string"},
-                    "variants": {"type": "array", "items": {"type": "object"}},
+                    "variants": {
+                        "type": "array",
+                        "description": "Variants as {name, fields?, doc?} objects; fields is a list of types (tuple variant) or of {name, type} objects (struct variant)",
+                        "items": {"type": "object"}
+                    },
                     "derives": {"type": "array", "items": {"type": "string"}},
                     "file_path": {"type": "string"}
                 },
@@ -243,7 +263,11 @@ pub fn get_tools() -> Vec<ToolDefinition> {
                 "properties": {
                     "target_function": {"type": "string"},
                     "file_path": {"type": "string"},
-                    "test_cases": {"type": "array", "items": {"type": "object"}}
+                    "test_cases": {
+                        "type": "array",
+                        "description": "Cases as {name, args, expected?} objects; args is a list of Rust expressions and expected is a Rust expression",
+                        "items": {"type": "object"}
+                    }
                 },
                 "required": ["target_function", "file_path"]
             }),
@@ -270,7 +294,10 @@ pub fn get_tools() -> Vec<ToolDefinition> {
                     "file_path": {"type": "string"},
                     "line": {"type": "number"},
                     "character": {"type": "number"},
-                    "new_signature": {"type": "string"}
+                    "new_signature": {
+                        "type": "string",
+                        "description": "The full declaration up to the body, e.g. `pub fn area(&self, scale: f64) -> f64`"
+                    }
                 },
                 "required": ["file_path", "line", "character", "new_signature"]
             }),
@@ -340,7 +367,10 @@ pub fn get_tools() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "module_name": {"type": "string"},
-                    "module_path": {"type": "string"},
+                    "module_path": {
+                        "type": "string",
+                        "description": "Directory to create the module in, or the parent module's file"
+                    },
                     "is_public": {"type": "boolean"}
                 },
                 "required": ["module_name", "module_path"]

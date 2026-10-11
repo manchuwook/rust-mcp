@@ -8,9 +8,10 @@ async fn main() -> Result<()> {
     let mut rust_server = RustMcpServer::new();
     rust_server.start().await?;
 
-    // Note: The #[tool] macros generate additional tools beyond our manual list
-    println!("Starting Rust MCP Server");
-    println!("Server running on stdio transport...");
+    // Note: The #[tool] macros generate additional tools beyond our manual list.
+    // Status goes to stderr so stdout stays clean for the JSON-RPC stream.
+    eprintln!("Starting Rust MCP Server");
+    eprintln!("Server running on stdio transport...");
 
     // Start the MCP server using the ServiceExt trait
     let service = rust_server.serve(stdio()).await?;

@@ -1,4 +1,5 @@
 pub mod client;
+pub mod edit;
 pub mod lsp;
 pub mod protocol;
 

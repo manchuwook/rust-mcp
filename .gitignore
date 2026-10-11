@@ -1,0 +1,26 @@
+# Cargo build output (including fixture crates built in place)
+target/
+
+# rustfmt backups
+**/*.rs.bk
+
+# MSVC debug symbols
+*.pdb
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code per-user settings (.claude/settings.json is shared and stays tracked)
+.claude/settings.local.json
+
+# Local environment files
+.env
+.env.*
