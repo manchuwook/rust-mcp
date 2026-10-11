@@ -385,7 +385,7 @@ fn is_use_line(line: &str) -> bool {
 
 /// The byte range covering a file's top-level `use` declarations, from the
 /// start of the first to the end of the last.
-fn import_block(text: &str) -> Option<(usize, usize)> {
+pub fn import_block(text: &str) -> Option<(usize, usize)> {
     let mut first = None;
     let mut last_end = None;
     let mut offset = 0;

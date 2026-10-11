@@ -1,13 +1,11 @@
 use crate::analyzer::RustAnalyzerClient;
-use crate::analyzer::edit::range_to_offsets;
-use crate::analyzer::protocol::{normalize_path, path_key};
+use crate::analyzer::protocol::normalize_path;
 use crate::tools::cargo::{cargo_dir, cargo_metadata, cargo_output, stderr_tail};
 use crate::tools::support::{
-    append_item, check_identifier, find_word, format_locations, read_source, str_arg, u32_arg,
-    write_source,
+    check_identifier, find_word, format_locations, read_source, str_arg, u32_arg, write_source,
 };
 use crate::tools::types::ToolResult;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -144,7 +142,7 @@ pub async fn suggest_dependencies_impl(
 ///
 /// `module_path` is either the directory to create the module in, or the
 /// parent module's file. Returns `(new_file, parent_file)`.
-fn plan_module(module_name: &str, module_path: &str) -> Result<(PathBuf, Option<PathBuf>)> {
+pub fn plan_module(module_name: &str, module_path: &str) -> Result<(PathBuf, Option<PathBuf>)> {
     let path = normalize_path(Path::new(module_path));
 
     let (dir, parent_file) = if path.is_file() || path.extension().is_some_and(|ext| ext == "rs") {
@@ -284,136 +282,10 @@ pub async fn create_module_impl(
     Ok(ToolResult::text(out.join("\n")))
 }
 
-/// Remove byte ranges (sorted, non-overlapping) from `text`, along with the
-/// blank line each one would otherwise leave behind.
-pub fn remove_ranges(text: &str, ranges: &[(usize, usize)]) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut cursor = 0;
-
-    fn push_kept(result: &mut String, mut kept: &str, after_removal: bool) {
-        if after_removal {
-            // Finish the removed item's last line, then drop the blank lines
-            // that separated it from what follows.
-            kept = kept.strip_prefix('\n').unwrap_or(kept);
-            while (result.is_empty() || result.ends_with("\n\n")) && kept.starts_with('\n') {
-                kept = &kept[1..];
-            }
-        }
-        result.push_str(kept);
-    }
-
-    for (index, (start, end)) in ranges.iter().enumerate() {
-        push_kept(&mut result, &text[cursor..*start], index > 0);
-        cursor = *end;
-    }
-    push_kept(&mut result, &text[cursor..], !ranges.is_empty());
-
-    while result.ends_with("\n\n") {
-        result.pop();
-    }
-    result
-}
-
-pub async fn move_items_impl(args: Value, analyzer: &mut RustAnalyzerClient) -> Result<ToolResult> {
-    let source_file = str_arg(&args, "source_file")?;
-    let target_file = str_arg(&args, "target_file")?;
-    let item_names_value = args
-        .get("item_names")
-        .ok_or_else(|| anyhow!("Missing item_names parameter"))?;
-
-    let item_names: Vec<&str> = item_names_value
-        .as_array()
-        .ok_or_else(|| anyhow!("item_names must be an array"))?
-        .iter()
-        .map(|v| v.as_str().unwrap_or("").trim())
-        .collect();
-    if item_names.is_empty() {
-        bail!("item_names is empty");
-    }
-
-    let source = normalize_path(Path::new(source_file));
-    let target = normalize_path(Path::new(target_file));
-    if path_key(&source) == path_key(&target) {
-        bail!("source_file and target_file are the same file");
-    }
-
-    let symbols = analyzer.document_symbols(source_file).await?;
-    let symbols = symbols.as_array().map_or(&[][..], Vec::as_slice);
-    let original = read_source(&source)?;
-    // Positions are line-based, so they are unaffected by line-ending style.
-    let text = original.replace("\r\n", "\n");
-
-    // Resolve every name before changing anything.
-    fn symbol_name(symbol: &Value) -> &str {
-        symbol.get("name").and_then(Value::as_str).unwrap_or("")
-    }
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    let mut missing = Vec::new();
-    for name in &item_names {
-        let mut found = false;
-        for symbol in symbols.iter().filter(|symbol| symbol_name(symbol) == *name) {
-            let range = symbol
-                .get("range")
-                .ok_or_else(|| anyhow!("rust-analyzer returned a symbol without a range"))?;
-            let offsets = range_to_offsets(&text, range)?;
-            if !ranges.contains(&offsets) {
-                ranges.push(offsets);
-            }
-            found = true;
-        }
-        if !found {
-            missing.push(*name);
-        }
-    }
-    if !missing.is_empty() {
-        let available: Vec<&str> = symbols.iter().map(symbol_name).collect();
-        bail!(
-            "No top-level item named {} in {}. Top-level items: {}",
-            missing.join(", "),
-            source.display(),
-            available.join(", ")
-        );
-    }
-    ranges.sort();
-
-    let moved: Vec<&str> = ranges
-        .iter()
-        .map(|(start, end)| &text[*start..*end])
-        .collect();
-    let target_existed = target.exists();
-    append_item(&target, &moved.join("\n\n"))?;
-
-    let mut remaining = remove_ranges(&text, &ranges);
-    if original.contains("\r\n") {
-        remaining = remaining.replace('\n', "\r\n");
-    }
-    write_source(&source, &remaining)?;
-
-    let mut out = vec![format!(
-        "Moved {} item(s) from {} to {}: {}",
-        ranges.len(),
-        source.display(),
-        target.display(),
-        item_names.join(", ")
-    )];
-    if !target_existed {
-        out.push(format!(
-            "{} was created; it still needs a `mod` declaration (see create_module).",
-            target.display()
-        ));
-    }
-    out.push(
-        "Imports, visibility and paths that refer to the moved items were NOT adjusted. Use \
-         run_cargo_check to find what needs updating."
-            .to_string(),
-    );
-
-    Ok(ToolResult::text(out.join("\n")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::protocol::path_key;
 
     #[test]
     fn search_results_are_parsed() {
@@ -482,29 +354,5 @@ mod tests {
 
         // Existing modules are not overwritten.
         assert!(plan_module("shapes", &src.to_string_lossy()).is_err());
-    }
-
-    #[test]
-    fn removing_items_leaves_single_blank_lines() {
-        let text = "use a::b;\n\nfn first() {}\n\n/// Doc.\nfn second() {}\n\nfn third() {}\n";
-        let range = |needle: &str, end: &str| {
-            let start = text.find(needle).unwrap();
-            (start, text[start..].find(end).unwrap() + start + end.len())
-        };
-
-        let middle = remove_ranges(text, &[range("/// Doc.", "second() {}")]);
-        assert_eq!(middle, "use a::b;\n\nfn first() {}\n\nfn third() {}\n");
-
-        let ends = remove_ranges(
-            text,
-            &[
-                range("fn first", "first() {}"),
-                range("fn third", "third() {}"),
-            ],
-        );
-        assert_eq!(ends, "use a::b;\n\n/// Doc.\nfn second() {}\n");
-
-        let all = remove_ranges("fn only() {}\n", &[(0, 12)]);
-        assert_eq!(all, "");
     }
 }

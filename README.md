@@ -46,7 +46,7 @@ Every tool either does its work on disk or returns an error; none report success
 - `get_type_hierarchy` - The declaration at a position and its implementations (a trait's implementors, or a type's impl blocks). rust-analyzer has no full supertype/subtype hierarchy
 - `suggest_dependencies` - Search crates.io for a query (needs network access) and mark crates the workspace already depends on
 - `create_module` - Create `<name>.rs` in a directory (or under a given parent module file) and add the `mod` declaration to the parent module
-- `move_items` - Move top-level items, with their doc comments and attributes, from one file to another. Imports and paths that refer to them are not adjusted
+- `move_items` - Move top-level items, with their doc comments and attributes, from one file to another and keep the crate compiling: references and imports elsewhere are pointed at the new module, the imports the items need are added to the target, visibility is widened to `pub(crate)` where required, and a new target file is declared as a module. Ends with a `cargo check` and reports anything it could not fix (macro-generated references, private fields, trait imports)
 
 ## Prerequisites
 
@@ -236,6 +236,7 @@ The server is built with a modular architecture:
   - `cargo.rs` - Project management tools
   - `navigation.rs` - Navigation tools (workspace_symbols)
   - `advanced.rs` - Advanced features (type hierarchy, dependencies, modules)
+  - `move_items.rs` - Moving items between files and repairing references, imports and visibility
 
 ## Development
 

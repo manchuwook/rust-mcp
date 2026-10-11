@@ -133,6 +133,40 @@ pub fn find_matching_brace(text: &str, open: usize) -> Option<usize> {
     None
 }
 
+/// The identifiers and keywords in `text` with their byte offsets, ignoring
+/// comments, string literals and char literals.
+pub fn code_identifiers(text: &str) -> Vec<(usize, &str)> {
+    let mut identifiers = Vec::new();
+    let mut current: Option<(usize, usize)> = None;
+
+    let mut finish = |current: &mut Option<(usize, usize)>| {
+        if let Some((start, end)) = current.take() {
+            // A leading digit means a number literal such as `2_f64`.
+            if !text[start..].starts_with(|c: char| c.is_ascii_digit()) {
+                identifiers.push((start, &text[start..end]));
+            }
+        }
+    };
+
+    for (offset, c) in code_chars(text, 0) {
+        let end = offset + c.len_utf8();
+        if c.is_alphanumeric() || c == '_' {
+            match &mut current {
+                Some((_, current_end)) if *current_end == offset => *current_end = end,
+                _ => {
+                    finish(&mut current);
+                    current = Some((offset, end));
+                }
+            }
+        } else {
+            finish(&mut current);
+        }
+    }
+    finish(&mut current);
+
+    identifiers
+}
+
 /// Iterate over the characters of `text` from byte offset `from` that are
 /// actual code, skipping comments, string literals and char literals.
 pub fn code_chars(text: &str, from: usize) -> impl Iterator<Item = (usize, char)> + '_ {

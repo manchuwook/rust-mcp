@@ -87,7 +87,7 @@ pub async fn execute_tool(
             crate::tools::advanced::suggest_dependencies_impl(args, analyzer).await
         }
         "create_module" => crate::tools::advanced::create_module_impl(args, analyzer).await,
-        "move_items" => crate::tools::advanced::move_items_impl(args, analyzer).await,
+        "move_items" => crate::tools::move_items::move_items_impl(args, analyzer).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }

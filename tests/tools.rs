@@ -550,11 +550,9 @@ async fn change_signature_rewrites_the_declaration_and_lists_call_sites() {
 }
 
 #[tokio::test]
-async fn modules_are_created_and_items_moved_into_them() {
+async fn modules_are_created_and_declared() {
     let fixture = Fixture::new();
-    let Some(mut analyzer) = fixture.analyzer().await else {
-        return;
-    };
+    let mut analyzer = RustAnalyzerClient::new();
 
     let created = call(
         &mut analyzer,
@@ -574,7 +572,94 @@ async fn modules_are_created_and_items_moved_into_them() {
         "{}",
         fixture.read("src/lib.rs")
     );
+    assert_eq!(fixture.read("src/geometry.rs"), "");
 
+    // Creating the same module twice is refused.
+    let duplicate = call(
+        &mut analyzer,
+        "create_module",
+        json!({ "module_name": "geometry", "module_path": fixture.path("src") }),
+    )
+    .await;
+    assert!(duplicate.is_err());
+}
+
+/// Rework the fixture so that `perimeter` and `diagonal` are referred to in
+/// every way a move has to cope with: a private helper and an import they
+/// depend on, an unqualified use left behind in their own file, and a
+/// grouped import plus qualified paths in another module.
+fn add_users_of_shapes(fixture: &Fixture) {
+    let write = |relative: &str, text: &str| {
+        std::fs::write(fixture.root.join(relative), text).unwrap();
+    };
+
+    write(
+        "src/shapes.rs",
+        r#"use crate::Shape;
+use std::f64::consts::SQRT_2;
+
+/// A square.
+pub struct Square {
+    pub side: f64,
+}
+
+impl Shape for Square {
+    fn area(&self) -> f64 {
+        self.side * self.side
+    }
+
+    fn name(&self) -> String {
+        "square".to_string()
+    }
+}
+
+fn sides() -> f64 {
+    4.0
+}
+
+/// The distance around a square.
+pub fn perimeter(square: &Square) -> f64 {
+    square.side * sides()
+}
+
+pub fn diagonal(square: &Square) -> f64 {
+    square.side * SQRT_2
+}
+
+pub fn double_perimeter(square: &Square) -> f64 {
+    perimeter(square) * 2.0
+}
+"#,
+    );
+    write(
+        "src/report.rs",
+        r#"use crate::shapes::{self, perimeter, Square};
+
+pub fn describe(square: &Square) -> String {
+    let around = perimeter(square);
+    let again = shapes::perimeter(square);
+    let full = crate::shapes::perimeter(square);
+    format!("{around} {again} {full} {}", shapes::diagonal(square))
+}
+"#,
+    );
+    write("src/geometry.rs", "");
+    let lib = fixture.read("src/lib.rs").replace(
+        "pub mod shapes;\n",
+        "pub mod geometry;\npub mod report;\npub mod shapes;\n",
+    );
+    write("src/lib.rs", &lib);
+}
+
+#[tokio::test]
+async fn moving_items_keeps_the_crate_compiling() {
+    let fixture = Fixture::new();
+    add_users_of_shapes(&fixture);
+    let Some(mut analyzer) = fixture.analyzer().await else {
+        return;
+    };
+
+    // Into an existing module.
     let moved = call(
         &mut analyzer,
         "move_items",
@@ -587,16 +672,87 @@ async fn modules_are_created_and_items_moved_into_them() {
     .await
     .unwrap();
     assert!(moved.contains("Moved 1 item(s)"), "{moved}");
+    assert!(moved.contains("made pub(crate): sides"), "{moved}");
+    assert!(moved.contains("cargo check passes"), "{moved}");
+
+    // The item arrives with the imports it needs.
     assert_eq!(
         fixture.read("src/geometry.rs"),
-        "/// The distance around a square.\npub fn perimeter(square: &Square) -> f64 {\n    square.side * 4.0\n}\n"
+        "use crate::shapes::Square;\nuse crate::shapes::sides;\n\n/// The distance around a square.\npub fn perimeter(square: &Square) -> f64 {\n    square.side * sides()\n}\n"
     );
+    // Its old file imports it for the code that still uses it, and exposes
+    // the helper it depends on.
     let shapes = fixture.read("src/shapes.rs");
-    assert!(!shapes.contains("perimeter"), "{shapes}");
+    assert!(!shapes.contains("fn perimeter"), "{shapes}");
     assert!(
-        shapes.contains("    }\n}\n\npub fn diagonal(square: &Square) -> f64 {"),
+        shapes.starts_with(
+            "use crate::Shape;\nuse std::f64::consts::SQRT_2;\nuse crate::geometry::perimeter;\n"
+        ),
         "{shapes}"
     );
+    assert!(
+        shapes.contains("pub(crate) fn sides() -> f64 {"),
+        "{shapes}"
+    );
+    assert!(
+        shapes.contains("    4.0\n}\n\npub fn diagonal(square: &Square) -> f64 {"),
+        "{shapes}"
+    );
+    // Other modules are pointed at its new home.
+    let report = fixture.read("src/report.rs");
+    assert!(
+        report.starts_with("use crate::shapes::{self, Square};\nuse crate::geometry::perimeter;\n"),
+        "{report}"
+    );
+    assert!(
+        report.contains("let around = perimeter(square);"),
+        "{report}"
+    );
+    assert!(
+        report.contains("let again = crate::geometry::perimeter(square);"),
+        "{report}"
+    );
+    assert!(
+        report.contains("let full = crate::geometry::perimeter(square);"),
+        "{report}"
+    );
+
+    // Into a file that does not exist yet.
+    let moved = call(
+        &mut analyzer,
+        "move_items",
+        json!({
+            "source_file": fixture.path("src/shapes.rs"),
+            "target_file": fixture.path("src/extra.rs"),
+            "item_names": ["diagonal"]
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(moved.contains("declared `pub mod extra;`"), "{moved}");
+    assert!(moved.contains("cargo check passes"), "{moved}");
+    assert_eq!(
+        fixture.read("src/extra.rs"),
+        "use std::f64::consts::SQRT_2;\nuse crate::shapes::Square;\n\npub fn diagonal(square: &Square) -> f64 {\n    square.side * SQRT_2\n}\n"
+    );
+    assert!(
+        fixture
+            .read("src/lib.rs")
+            .contains("pub mod shapes;\npub mod extra;\n"),
+        "{}",
+        fixture.read("src/lib.rs")
+    );
+    // The import only `diagonal` used went with it.
+    let shapes = fixture.read("src/shapes.rs");
+    assert!(!shapes.contains("SQRT_2"), "{shapes}");
+    assert!(
+        fixture
+            .read("src/report.rs")
+            .contains("crate::extra::diagonal(square)"),
+        "{}",
+        fixture.read("src/report.rs")
+    );
+    assert!(cargo_check(&fixture).await.contains("0 error(s)"));
 
     // An unknown item is an error and changes nothing.
     let unknown = call(
@@ -605,19 +761,10 @@ async fn modules_are_created_and_items_moved_into_them() {
         json!({
             "source_file": fixture.path("src/shapes.rs"),
             "target_file": fixture.path("src/geometry.rs"),
-            "item_names": ["diagonal", "missing"]
+            "item_names": ["double_perimeter", "missing"]
         }),
     )
     .await;
     assert!(unknown.unwrap_err().to_string().contains("missing"));
     assert_eq!(fixture.read("src/shapes.rs"), shapes);
-
-    // Creating the same module twice is refused.
-    let duplicate = call(
-        &mut analyzer,
-        "create_module",
-        json!({ "module_name": "geometry", "module_path": fixture.path("src") }),
-    )
-    .await;
-    assert!(duplicate.is_err());
 }
